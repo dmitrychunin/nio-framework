@@ -3,7 +3,7 @@ package ru.otus.framework.el;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
-import ru.otus.framework.pipeline.ChannelPipeline;
+import ru.otus.framework.Router;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -24,17 +24,19 @@ public class BossEventLoop implements EventLoop {
     private final int port;
     private final int workerThreadCount;
     private final List<WorkerEventLoop> workerList;
+    private final List<Router> routers;
     private ExecutorService workerExecutor;
 
-    public BossEventLoop(int port, int workerThreadCount) {
+    public BossEventLoop(int port, int workerThreadCount, List<Router> routers) {
         this.port = port;
         this.workerThreadCount = workerThreadCount;
         this.workerList = new ArrayList<>(workerThreadCount);
+        this.routers = routers;
     }
 
     @Override
-    public void go(ChannelPipeline pipeline) {
-        initWorkers(pipeline);
+    public void go() {
+        initWorkers();
         try (ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
              Selector acceptSelector = Selector.open()) {
             serverSocketChannel.configureBlocking(false);
@@ -50,9 +52,9 @@ public class BossEventLoop implements EventLoop {
                     socketChannel.configureBlocking(false);
                     log.info("boss: new connection finded");
                     manageSmoothSocketAllocationOnWorkers(socketChannel);
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
                 try {
                     Thread.sleep(1000);
                 } catch (InterruptedException e) {
@@ -65,15 +67,15 @@ public class BossEventLoop implements EventLoop {
         }
     }
 
-    private void initWorkers(ChannelPipeline pipeline) {
+    private void initWorkers() {
         workerExecutor = Executors.newFixedThreadPool(workerThreadCount);
         for (int i = 0; i < workerThreadCount; i++) {
             String workerName = "worker-" + i;
-            WorkerEventLoop workerEventLoop = new WorkerEventLoop(workerName);
+            WorkerEventLoop workerEventLoop = new WorkerEventLoop(workerName, routers);
 //          todo stop disconnected clients and remove corresponding worker socket???
             workerList.add(workerEventLoop);
             log.info("boss: submit new {} event loop", workerName);
-            workerExecutor.submit(() -> workerEventLoop.go(pipeline));
+            workerExecutor.submit(workerEventLoop::go);
         }
     }
 

@@ -3,6 +3,7 @@ package ru.otus.framework.el;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import ru.otus.framework.RequestContext;
+import ru.otus.framework.Router;
 import ru.otus.framework.pipeline.ChannelPipeline;
 
 import java.io.IOException;
@@ -12,6 +13,7 @@ import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -28,6 +30,7 @@ public class WorkerEventLoop implements EventLoop {
     private Selector readSelector;
     private int activeSocketsCount;
     private List<Future<RequestContext>> resultList = new ArrayList<>();
+    private final List<Router> routers;
 
     public void registerSocket(SocketChannel socketChannel) {
         activeSocketsCount++;
@@ -39,7 +42,7 @@ public class WorkerEventLoop implements EventLoop {
     }
 
     @Override
-    public void go(ChannelPipeline pipeline) {
+    public void go() {
         try (Selector readSelector = Selector.open()) {
 //            todo refactor
             this.readSelector = readSelector;
@@ -56,11 +59,7 @@ public class WorkerEventLoop implements EventLoop {
                         SocketChannel channel = (SocketChannel) key.channel();
                         String socketPayload = readRequestPayload(channel);
                         RequestContext requestContext = new RequestContext(socketPayload, channel, workerName);
-                        //            todo refactor
-                        if (isClientSendStopRequest(socketPayload)) {
-                            closeSocketAndSendResponse(channel, socketPayload);
-                            continue;
-                        }
+                        ChannelPipeline pipeline = selectFirstMatchingRouterAndPipeline(requestContext);
                         Future<RequestContext> submit = asyncPipelineExecutor.submit(() -> pipeline.start(requestContext, requestContext.getHttpRequestPayload()));
                         resultList.add(submit);
                     } else if (key.isWritable()) {
@@ -78,6 +77,15 @@ public class WorkerEventLoop implements EventLoop {
             runtimeException.initCause(e);
             throw runtimeException;
         }
+    }
+
+    private ChannelPipeline selectFirstMatchingRouterAndPipeline(RequestContext requestContext) {
+        Optional<ChannelPipeline> firstMatchedPipeline = routers.stream()
+                .map(router -> router.getPipeline(requestContext))
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .findFirst();
+        return firstMatchedPipeline.orElseThrow(RuntimeException::new);
     }
 
     public void writeResponsePayload(SocketChannel socket, String message) {
@@ -100,6 +108,12 @@ public class WorkerEventLoop implements EventLoop {
         } catch (IOException e) {
             e.printStackTrace();
             throw new RuntimeException();
+        }
+
+        try {
+            socket.close();
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 
@@ -156,22 +170,6 @@ public class WorkerEventLoop implements EventLoop {
         try {
             Thread.sleep(1000);
         } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private boolean isClientSendStopRequest(String requestPayload) {
-        return "stop\n".equals(requestPayload);
-    }
-
-    //    todo refactor use another pipeline?
-    private void closeSocketAndSendResponse(SocketChannel channel, String requestPayload) {
-        log.info("channel closed by client request");
-        writeResponsePayload(channel, requestPayload);
-        try {
-            channel.close();
-//            todo what if close fails?
-        } catch (IOException e) {
             e.printStackTrace();
         }
     }
