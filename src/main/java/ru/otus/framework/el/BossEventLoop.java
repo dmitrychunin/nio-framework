@@ -20,7 +20,7 @@ import java.util.concurrent.Executors;
 @Slf4j
 @Setter
 @Getter
-public class BossEventLoop implements EventLoop {
+class BossEventLoop implements EventLoop {
     private final int port;
     private final int workerThreadCount;
     private final List<WorkerEventLoop> workerList;
@@ -72,7 +72,6 @@ public class BossEventLoop implements EventLoop {
         for (int i = 0; i < workerThreadCount; i++) {
             String workerName = "worker-" + i;
             WorkerEventLoop workerEventLoop = new WorkerEventLoop(workerName, routers);
-//          todo stop disconnected clients and remove corresponding worker socket???
             workerList.add(workerEventLoop);
             log.info("boss: submit new {} event loop", workerName);
             workerExecutor.submit(workerEventLoop::go);

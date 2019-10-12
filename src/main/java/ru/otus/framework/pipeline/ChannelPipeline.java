@@ -18,7 +18,11 @@ public class ChannelPipeline {
     }
     public RequestContext start(RequestContext context, Object message) {
         for (ChannelHandler channelHandler : pipelineHandlerOrder) {
-            message = channelHandler.handle(context, message);
+            try {
+                message = channelHandler.handle(context, message);
+            } catch (Throwable e) {
+                channelHandler.exceptionCaught(context, e);
+            }
         }
         context.setPayload(message);
         return context;

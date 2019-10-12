@@ -1,6 +1,6 @@
 package ru.otus.framework.el;
 
 
-public interface EventLoop {
+interface EventLoop {
     void go();
 }

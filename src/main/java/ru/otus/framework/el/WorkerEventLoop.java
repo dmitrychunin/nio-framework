@@ -19,18 +19,15 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
-import static java.lang.String.format;
-
 @Slf4j
 @Data
-public class WorkerEventLoop implements EventLoop {
-    //    todo make final and @value
+class WorkerEventLoop implements EventLoop {
     private final String workerName;
     private final ExecutorService asyncPipelineExecutor = Executors.newSingleThreadExecutor();
+    private final List<Router> routers;
     private Selector readSelector;
     private int activeSocketsCount;
     private List<Future<RequestContext>> resultList = new ArrayList<>();
-    private final List<Router> routers;
 
     public void registerSocket(SocketChannel socketChannel) {
         activeSocketsCount++;
@@ -69,7 +66,6 @@ public class WorkerEventLoop implements EventLoop {
                     }
                     readKeys.remove();
                 }
-                sleepOneSecond();
             }
         } catch (IOException | InterruptedException | ExecutionException e) {
             e.printStackTrace();
@@ -86,35 +82,6 @@ public class WorkerEventLoop implements EventLoop {
                 .map(Optional::get)
                 .findFirst();
         return firstMatchedPipeline.orElseThrow(RuntimeException::new);
-    }
-
-    public void writeResponsePayload(SocketChannel socket, String message) {
-        try {
-            ByteBuffer buffer = ByteBuffer.allocate(5);
-            byte[] response = message.getBytes();
-            for (byte b : response) {
-                buffer.put(b);
-                if (buffer.position() == buffer.limit()) {
-                    buffer.flip();
-                    socket.write(buffer);
-                    buffer.flip();
-                    buffer.clear();
-                }
-            }
-            if (buffer.hasRemaining()) {
-                buffer.flip();
-                socket.write(buffer);
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-            throw new RuntimeException();
-        }
-
-        try {
-            socket.close();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
     }
 
     public String readRequestPayload(SocketChannel socket) {
@@ -149,34 +116,15 @@ public class WorkerEventLoop implements EventLoop {
             SocketChannel socket = context.getSocket();
 
             if (socket == channel) {
-                String httpResponse = generateHttpResponse(context);
-                writeResponsePayload((SocketChannel) channel, httpResponse);
+                String httpResponse = context.generateHttpResponse();
+                context.writeResponsePayload(httpResponse);
                 resultList.remove(i);
             }
         }
     }
 
-    private String generateHttpResponse(RequestContext requestContext) {
-        String payload = (String) requestContext.getPayload();
-        return format(
-                "HTTP/1.1 200 OK\r\n" +
-                        "Content-Type: plain/text\r\n" +
-                        "Connection: Closed\r\n" +
-                        "Content-Length: %s\r\n" +
-                        "\r\n%s", payload.length(), payload);
-    }
-
-    private void sleepOneSecond() {
-        try {
-            Thread.sleep(1000);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-    }
-
     private void syncActiveSocketsCount() {
-        for (int i = 0; i < resultList.size(); i++) {
-            Future<RequestContext> booleanFuture = resultList.get(i);
+        for (Future<RequestContext> booleanFuture : resultList) {
             if (!booleanFuture.isDone()) {
                 continue;
             }
